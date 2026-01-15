@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="AgentKit/AgentKit.csproj" />
+  <Project Path="AgentKitConsoleApplication/AgentKitConsoleApplication.csproj" Id="fd6ea268-58a4-47bf-92aa-b1b0e1ed96c2" />
+</Solution>
