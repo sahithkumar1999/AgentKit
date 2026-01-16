@@ -8,14 +8,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="AgentKitLib" Version="1.0.1" />
     <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.2" />
     <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.2" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.2" />
   </ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\AgentKitLib\AgentKitLib.csproj" />
-  </ItemGroup>
+ 
 
 	<ItemGroup>
 		<None Update="appsettings.json">

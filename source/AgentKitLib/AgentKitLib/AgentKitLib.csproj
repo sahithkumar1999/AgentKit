@@ -7,14 +7,19 @@
     <GeneratePackageOnBuild>False</GeneratePackageOnBuild>
     <Version>1.0.1</Version>
     <Authors>Sahith Kumar Singari</Authors>
-    <PackageReadmeFile>Readme.md</PackageReadmeFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <Product>AgentKitLib</Product>
     <PackageId>AgentKitLib</PackageId>
     <PackageLicenseFile>license.txt</PackageLicenseFile>
+    <RepositoryUrl>https://github.com/sahithkumar1999/AgentKit</RepositoryUrl>
   </PropertyGroup>
 
   <ItemGroup>
     <None Include="..\..\..\license.txt">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+    <None Include="..\..\..\README.md">
       <Pack>True</Pack>
       <PackagePath>\</PackagePath>
     </None>
