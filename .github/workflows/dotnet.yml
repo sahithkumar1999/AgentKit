@@ -30,13 +30,13 @@ jobs:
           **/*.sln
 
     - name: Restore
-      run: dotnet restore --verbosity minimal
+      run: dotnet restore source/AgentKitLib/AgentKitLib.sln
 
     - name: Build
-      run: dotnet build --no-restore -c Release
+      run: dotnet build source/AgentKitLib/AgentKitLib.sln --no-restore -c Release
 
     - name: Test
-      run: dotnet test --no-build -c Release --verbosity normal --logger "trx;LogFileName=test_results.trx"
+      run: dotnet test  source/AgentKitLib/AgentKitLib.sln --no-build -c Release --verbosity normal
 
     - name: Upload test results
       if: always()
