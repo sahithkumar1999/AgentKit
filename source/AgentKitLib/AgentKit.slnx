@@ -1,4 +1,5 @@
 <Solution>
   <Project Path="AgentKitConsoleApplication/AgentKitConsoleApplication.csproj" Id="fd6ea268-58a4-47bf-92aa-b1b0e1ed96c2" />
   <Project Path="AgentKitLib/AgentKitLib.csproj" />
+  <Project Path="AgentKitLibTestProject/AgentKitLibTestProject.csproj" Id="57e2487b-7038-48cf-8b98-b11f0848917b" />
 </Solution>
