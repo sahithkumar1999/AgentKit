@@ -15,16 +15,20 @@ public sealed class OpenCvImageProcessor : IImageProcessor
     {
         ct.ThrowIfCancellationRequested();
 
-        // Read the entire input stream into memory (simplest + reliable for decoding).
-        // If images are huge, consider a temp file approach.
         using var inputMs = new MemoryStream();
         inputImage.CopyTo(inputMs);
         var inputBytes = inputMs.ToArray();
 
-        // Decode image bytes to Mat (keeps color by default).
+        if (inputBytes.Length == 0)
+            throw new InvalidOperationException("OpenCV could not decode the input image because the input stream was empty.");
+
         using var src = Cv2.ImDecode(inputBytes, ImreadModes.Color);
         if (src.Empty())
-            throw new InvalidOperationException("OpenCV could not decode the input image (empty Mat).");
+        {
+            var header = BitConverter.ToString(inputBytes.Take(Math.Min(16, inputBytes.Length)).ToArray());
+            throw new InvalidOperationException(
+                $"OpenCV could not decode the input image (empty Mat). Bytes={inputBytes.Length}, Header[0..15]={header}");
+        }
 
         using var current = src.Clone();
 

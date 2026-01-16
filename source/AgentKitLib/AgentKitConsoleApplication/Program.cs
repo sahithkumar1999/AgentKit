@@ -34,7 +34,6 @@ internal sealed class Program
             config["OcrEnhance:OpenAI:Endpoint"]
             ?? throw new InvalidOperationException("Missing config: OcrEnhance:OpenAI:Endpoint");
 
-        // Require the model to be present in JSON (no silent fallback).
         string model =
             config["OcrEnhance:OpenAI:Model"]
             ?? throw new InvalidOperationException("Missing config: OcrEnhance:OpenAI:Model");
@@ -43,12 +42,14 @@ internal sealed class Program
             config["OcrEnhance:OpenAI:ApiKeyEnvVar"]
             ?? "OPENAI_API_KEY";
 
-        // 2) Read API key from environment variable (don’t store secrets in JSON)
+        string tesseractDataPath =
+            config["OcrEnhance:Tesseract:DataPath"]
+            ?? throw new InvalidOperationException("Missing config: OcrEnhance:Tesseract:DataPath");
+
         string? apiKey = Environment.GetEnvironmentVariable(apiKeyEnvVar);
         if (string.IsNullOrWhiteSpace(apiKey))
             throw new InvalidOperationException($"Environment variable '{apiKeyEnvVar}' is not set.");
 
-        // 3) Validate args
         if (args.Length < 2)
         {
             PrintUsage();
@@ -59,22 +60,8 @@ internal sealed class Program
         string prompt = args[1];
 
         string imagePath = ResolveExistingPath(imagePathArg)
-            ?? throw new FileNotFoundException(
-                $"Input image not found: {imagePathArg}{Environment.NewLine}" +
-                $"Tried:{Environment.NewLine}" +
-                $"  - {Path.GetFullPath(imagePathArg)}{Environment.NewLine}" +
-                $"  - {Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, imagePathArg))}");
+            ?? throw new FileNotFoundException($"Input image not found: {imagePathArg}");
 
-        // 4) Create the tool (planner + processor + store wiring)
-        var tool = ToolFactory.CreateDefault(
-            storageRoot: storageRoot,
-            openAiApiKey: apiKey,
-            endpoint: endpoint,
-            model: model);
-
-        // 5) Import the image into the store to get an imageReference (required by EnhancementService)
-        // NOTE: OcrEnhanceTool currently only exposes EnhanceForOcr(reference, prompt), so we save directly
-        // using the same LocalImageStore path configured in ToolFactory.
         var store = new LocalImageStore(new LocalImageStoreOptions { RootDirectory = storageRoot });
 
         string ext = Path.GetExtension(imagePath);
@@ -83,43 +70,40 @@ internal sealed class Program
 
         await using var fileStream = File.OpenRead(imagePath);
 
-        // This returns a short reference like "A1B2C3D4"; the image is stored under StorageRoot.
         string imageReference = await store.SaveAsync(
             imageStream: fileStream,
             fileExtension: ext,
             suggestedReference: Path.GetFileNameWithoutExtension(imagePath),
             ct: cts.Token);
 
-        Console.WriteLine("Imported image.");
-        Console.WriteLine($"  Input:     {imagePath}");
-        Console.WriteLine($"  Storage:   {storageRoot}");
-        Console.WriteLine($"  Reference: {imageReference}");
-        Console.WriteLine();
+        var pipeline = ToolFactory.CreateDefaultOcrPipeline(
+            storageRoot: storageRoot,
+            openAiApiKey: apiKey,
+            endpoint: endpoint,
+            tesseractDataPath: tesseractDataPath,
+            model: model);
 
-        // 6) Run enhancement (returns comma-separated references)
-        Console.WriteLine("Planning + enhancing (this calls OpenAI and then processes the image locally)...");
-        string refsCsv = await tool.EnhanceForOcr(imageReference, prompt);
+        var artifacts = await pipeline.RunAsync(imageReference, prompt, cts.Token);
 
-        Console.WriteLine();
-        Console.WriteLine("Generated variant references:");
-        foreach (var r in refsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            Console.WriteLine($"  {r}");
+        Console.WriteLine("OCR outputs:");
+        foreach (var a in artifacts)
+        {
+            Console.WriteLine($"  {a.ImageReference}");
+            Console.WriteLine($"    txt:  {a.TxtPath}");
+            Console.WriteLine($"    json: {a.JsonPath}");
+            Console.WriteLine($"    conf: {a.Result.MeanConfidence:0.000}  ms: {a.Ms}");
+        }
     }
 
     private static string? ResolveExistingPath(string path)
     {
-        // 1) As-is (relative to current working directory, or absolute)
         if (File.Exists(path))
             return Path.GetFullPath(path);
 
-        // 2) Relative to the app base directory (bin\Debug\net10.0\...)
         var baseDirCandidate = Path.Combine(AppContext.BaseDirectory, path);
         if (File.Exists(baseDirCandidate))
             return Path.GetFullPath(baseDirCandidate);
 
-        // 3) Relative to the project directory (useful when running from solution/repo root)
-        // AppContext.BaseDirectory is: <project>\bin\Debug\net10.0\
-        // So go up 3 levels to: <project>\
         var projectDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", ".."));
         var projectDirCandidate = Path.Combine(projectDir, path);
         if (File.Exists(projectDirCandidate))
@@ -132,8 +116,5 @@ internal sealed class Program
     {
         Console.WriteLine("Usage:");
         Console.WriteLine("  AgentKitConsoleApplication <imagePath> \"<prompt>\"");
-        Console.WriteLine();
-        Console.WriteLine("Example:");
-        Console.WriteLine("  dotnet run --project .\\AgentKitConsoleApplication\\AgentKitConsoleApplication.csproj -- \".\\AgentKitConsoleApplication\\InputImages\\Screenshot.png\" \"Deskew, increase contrast, denoise lightly, then sharpen for OCR.\"");
     }
 }

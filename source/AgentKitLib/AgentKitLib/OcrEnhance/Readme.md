@@ -39,6 +39,7 @@ File: `AgentKitConsoleApplication\appsettings.json`
 - `OcrEnhance:OpenAI:Endpoint` defaults to Responses API: `https://api.openai.com/v1/responses`
 - `OcrEnhance:OpenAI:Model` must be set (no silent fallback)
 - `OcrEnhance:OpenAI:ApiKeyEnvVar` is the env var that contains your key (default `OPENAI_API_KEY`)
+- `OcrEnhance:Tesseract:DataPath` is the folder containing Tesseract language data files (e.g., `eng.traineddata`)
 
 ### 2) Set your OpenAI key in an environment variable
 
@@ -69,12 +70,29 @@ dotnet run --project AgentKitConsoleApplication
 
 ### 4) Running the Program with arguments
 
-#### Example A: Run using a full command (PowerShell)
+> All examples below assume the image is imported into `OcrEnhance:StorageRoot` and outputs are generated alongside it.
+
+#### Example A: Extract text (OCR only; no enhancement)
 ```powershell
-dotnet run --project AgentKitConsoleApplication -- "Deskew, increase contrast, denoise lightly, then sharpen for OCR" "C:\path\to\image.jpg"
+dotnet run --project AgentKitConsoleApplication -- "ocr" "C:\path\to\image.jpg"
 ```
 
-#### Example B: Run using `dotnet user-secrets` (recommended for development)
+#### Example B: Return ONLY JSON + create 3 enhancement variants
+```powershell
+dotnet run --project AgentKitConsoleApplication -- "Deskew, increase contrast, denoise lightly, then sharpen for OCR" "C:\path\to\image.jpg" --jsononly --variants 3
+```
+
+#### Example C: Return ONLY text + create 3 enhancement variants
+```powershell
+dotnet run --project AgentKitConsoleApplication -- "ocr" "C:\path\to\image.jpg" --variants 3
+```
+
+#### Example D: Rotate the image 180 degrees (enhance + OCR)
+```powershell
+dotnet run --project AgentKitConsoleApplication -- "rotate 180" "C:\path\to\image.jpg"
+```
+
+#### Example E: Run using `dotnet user-secrets` (recommended for development)
 ```bash
 # Initialize user secrets (if not done)
 dotnet new3 user-secrets

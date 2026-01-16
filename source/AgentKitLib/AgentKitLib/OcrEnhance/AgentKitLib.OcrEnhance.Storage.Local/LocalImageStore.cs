@@ -1,8 +1,5 @@
-﻿using AgentKitLib.OcrEnhance.Storage.Local;
-using AgentKitLib.OcrEnhance.Core.Abstractions;
+﻿using AgentKitLib.OcrEnhance.Core.Abstractions;
 using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace AgentKitLib.OcrEnhance.Storage.Local;
 
@@ -21,13 +18,25 @@ public sealed class LocalImageStore : IImageStore
         if (string.IsNullOrWhiteSpace(fileExtension)) fileExtension = ".png";
         if (!fileExtension.StartsWith('.')) fileExtension = "." + fileExtension;
 
-        var reference = string.IsNullOrWhiteSpace(suggestedReference)
+        var referenceBase = string.IsNullOrWhiteSpace(suggestedReference)
             ? Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()
             : suggestedReference.Trim();
 
+        // Ensure uniqueness to avoid overwriting/corrupting earlier runs.
+        var reference = referenceBase;
         var path = Path.Combine(_opts.RootDirectory, $"{reference}{fileExtension}");
+
+        int attempt = 0;
+        while (File.Exists(path))
+        {
+            attempt++;
+            reference = $"{referenceBase}_{attempt:000}";
+            path = Path.Combine(_opts.RootDirectory, $"{reference}{fileExtension}");
+        }
+
         await using var fs = File.Create(path);
         await imageStream.CopyToAsync(fs, ct);
+
         return reference;
     }
 
