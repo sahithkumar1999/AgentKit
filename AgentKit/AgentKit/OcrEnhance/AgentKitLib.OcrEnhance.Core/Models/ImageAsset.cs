@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace AgentKit.OcrEnhance.Core.Models
+namespace AgentKitLib.OcrEnhance.Core.Models
 {
     public sealed record ImageAsset(
         string Reference,

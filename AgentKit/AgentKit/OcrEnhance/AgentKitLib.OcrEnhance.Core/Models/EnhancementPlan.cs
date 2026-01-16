@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json.Serialization;
 
 
-namespace AgentKit.OcrEnhance.Core.Models;
+namespace AgentKitLib.OcrEnhance.Core.Models;
 
 /// <summary>
 /// Represents a comprehensive plan for image enhancement operations designed to optimize images for OCR processing.

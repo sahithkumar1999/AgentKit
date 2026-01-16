@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace AgentKit.OcrEnhance.Core.Abstractions;
+namespace AgentKitLib.OcrEnhance.Core.Abstractions;
 
 /// <summary>
 /// Defines a storage abstraction for managing image assets and their enhancement variants.
