@@ -1,115 +1,92 @@
 ﻿# AgentKit.OcrEnhance
 
-## Overview
+Image preprocessing for better OCR—**planned from natural-language prompts** and **executed locally**.
 
-AgentKit.OcrEnhance is a component of the AgentKit framework focused on preparing images for better Optical Character Recognition (OCR) results. It provides a small set of core models and abstractions that help you:
+This library turns a prompt like:
 
-- Track image inputs with consistent metadata (`ImageAsset`)
-- Define *repeatable* image enhancement pipelines using a JSON-serializable plan format (`EnhancementPlan`)
-- Store originals and generated variants in a pluggable way (`IImageStore`)
-- Generate stable, content-derived identifiers for images (`IImageReferenceGenerator`)
+> “Deskew, increase contrast, denoise lightly, then sharpen for OCR”
 
-The goal is to make OCR preprocessing configurable, testable, and independent of any specific storage provider or OCR engine.
+into a JSON enhancement plan (via OpenAI), then applies the plan to your image (via OpenCV), saving one or more enhanced *variants* you can feed into your OCR engine.
 
-## Project Structure
+---
 
-- **`AgentKit.OcrEnhance.Core`**: Core models and abstractions for image enhancement planning and storage
+## What you get
 
-## Core Models
+- **Prompt → Plan**: `IPromptPlanner` converts natural language into an `EnhancementPlan` (JSON).
+- **Plan → Pixels**: `IImageProcessor` applies the plan steps to an image stream (OpenCV implementation included).
+- **Originals + Variants storage**: `IImageStore` persists the base image and generated variants (local disk implementation included).
+- **A/B variants**: `EnhancementPlan` supports multiple variants (pipelines) for comparing OCR outcomes.
 
-### `ImageAsset`
+> This module does **not** run OCR itself. It generates enhanced images meant to improve OCR.
 
-Represents an image asset with metadata required for processing and tracking.
-
-**Properties:**
-- `Reference` (`string`): Unique reference identifier for the image asset (typically the storage key or content-derived ID)
-- `FileName` (`string`): Original filename of the image
-- `ContentType` (`string`): MIME type of the image (e.g., `image/jpeg`, `image/png`)
-- `SizeBytes` (`long`): Size of the image file in bytes
-- `Width` (`int?`): Width of the image in pixels (optional)
-- `Height` (`int?`): Height of the image in pixels (optional)
-- `CreatedUtc` (`DateTimeOffset`): UTC timestamp when the asset was created
-
-### `EnhancementPlan`
-
-Defines an enhancement plan consisting of one or more *variants*. Each variant is an ordered pipeline of enhancement *steps*. This lets you try multiple preprocessing strategies and select the best OCR result later.
-
-**Shape (high level):**
-- `variants[]` → `PlanVariant`
-  - `name` → stable identifier for the variant (e.g., `standard`, `high-contrast`)
-  - `steps[]` → `PlanStep`
-    - `op` → operation name (string)
-    - `params` → operation-specific parameter bag (key/value)
-
-**Common operations (examples):**
-- `zoom`, `rotate`, `autocontrast`, `clahe`, `denoise`, `binarize`, `deskew`, `sharpen`
-
-> Note: the plan is designed to be flexible; the execution engine decides which `op` values are supported and what `params` are expected.
-
-#### Example plan JSON
-
-```
-{
-  "variants": [
-    {
-      "name": "standard",
-      "steps": [
-        { "op": "autocontrast", "params": { "cutoff": 0.01 } },
-        { "op": "sharpen", "params": { "amount": 1.5 } }
-      ]
-    },
-    {
-      "name": "high-contrast",
-      "steps": [
-        { "op": "autocontrast", "params": { "cutoff": 0.05 } },
-        { "op": "binarize", "params": { "threshold": 128 } }
-      ]
-    }
-  ]
-}
-```
-
-## Core Abstractions
-
-### `IImageStore`
-
-Storage abstraction used to persist original images and enhancement outputs (variants). Keeps the enhancement pipeline independent from the storage backend (local disk, blob storage, etc.).
-
-**Key members:**
-- `SaveAsync(...)` → persist an original image and return a reference
-- `OpenReadAsync(...)` → open a read stream for an image reference
-- `ExistsAsync(...)` → check whether a reference exists
-- `SaveVariantAsync(...)` → persist a generated variant tied to a base image reference
-
-### `IImageReferenceGenerator`
-
-Generates an image reference from raw bytes. Useful when you want stable, deterministic IDs (for example, hash-based content addressing) which enables deduplication and idempotent saves.
-
-**Key member:**
-- `CreateReference(ReadOnlySpan<byte> imageBytes)` → returns a stable reference string
-
-## Features
-
-- Configurable enhancement pipelines via `EnhancementPlan`
-- Multi-variant strategy support for A/B preprocessing
-- Metadata tracking for image assets
-- Storage abstraction for originals and generated variants
-- Stable reference generation via a pluggable strategy
+---
 
 ## Requirements
 
-- .NET 10
+- **.NET 10**
+- An **OpenAI API key** (read from an environment variable)
+- OpenCV via `OpenCvSharp` (already referenced by the project)
 
-## Getting Started
+---
 
-(Coming soon)
+## Quick start (Console app)
 
-Suggested flow (conceptual):
-1. Add an `IImageReferenceGenerator` implementation (e.g., SHA-256 hash based).
-2. Add an `IImageStore` implementation (local file system or cloud storage).
-3. Save an original image → get a reference.
-4. Execute one or more `EnhancementPlan` variants.
-5. Save generated variant images through `SaveVariantAsync(...)`.
+### 1) Configure `appsettings.json`
+
+File: `AgentKitConsoleApplication\appsettings.json`
+
+- `OcrEnhance:StorageRoot` is where images and variants are stored.
+- `OcrEnhance:OpenAI:Endpoint` defaults to Responses API: `https://api.openai.com/v1/responses`
+- `OcrEnhance:OpenAI:Model` must be set (no silent fallback)
+- `OcrEnhance:OpenAI:ApiKeyEnvVar` is the env var that contains your key (default `OPENAI_API_KEY`)
+
+### 2) Set your OpenAI key in an environment variable
+
+PowerShell (current session):
+```powershell
+$env:OPENAI_API_KEY="sk-..."
+```
+Or permanently (Windows):
+```powershell
+[Environment]::SetEnvironmentVariable("OPENAI_API_KEY", "sk-...", [EnvironmentVariableTarget]::Machine)
+```
+Linux / macOS:
+```bash
+export OPENAI_API_KEY="sk..."
+```
+
+### 3) Build and run the console app
+
+Open in IDE or command line:
+
+```bash
+# Build
+dotnet build
+
+# Run
+dotnet run --project AgentKitConsoleApplication
+```
+
+### 4) Running the Program with arguments
+
+#### Example A: Run using a full command (PowerShell)
+```powershell
+dotnet run --project AgentKitConsoleApplication -- "Deskew, increase contrast, denoise lightly, then sharpen for OCR" "C:\path\to\image.jpg"
+```
+
+#### Example B: Run using `dotnet user-secrets` (recommended for development)
+```bash
+# Initialize user secrets (if not done)
+dotnet new3 user-secrets
+
+# Set your OpenAI key
+dotnet user-secrets set "OcrEnhance:OpenAI:ApiKeyEnvVar" "sk-..."
+
+# Run the app (no need to pass the API key)
+dotnet run --project AgentKitConsoleApplication -- "Deskew, increase contrast, denoise lightly, then sharpen for OCR" "C:\path\to\image.jpg"
+```
+
+---
 
 ## License
 
