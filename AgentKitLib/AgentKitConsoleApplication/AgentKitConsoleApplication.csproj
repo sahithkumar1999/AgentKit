@@ -8,7 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\AgentKit\AgentKitLib.csproj" />
+    <ProjectReference Include="..\AgentKitLib\AgentKitLib.csproj" />
   </ItemGroup>
 
 </Project>
