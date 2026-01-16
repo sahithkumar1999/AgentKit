@@ -14,17 +14,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="..\..\license.txt">
-      <Pack>True</Pack>
-      <PackagePath>\</PackagePath>
-    </None>
-    <None Include="..\..\README.md">
-      <Pack>True</Pack>
-      <PackagePath>\</PackagePath>
-    </None>
-  </ItemGroup>
-
-  <ItemGroup>
     <None Update="OcrEnhance\Readme.md">
       <Pack>True</Pack>
       <PackagePath>\</PackagePath>
