@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace AgentKit.OcrEnhance.Storage.Local;
+namespace AgentKitLib.OcrEnhance.Storage.Local;
 
 public sealed class LocalImageStoreOptions
 {
