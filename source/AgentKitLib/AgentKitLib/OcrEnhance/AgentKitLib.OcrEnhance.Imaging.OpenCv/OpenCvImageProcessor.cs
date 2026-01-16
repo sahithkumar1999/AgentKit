@@ -9,12 +9,51 @@ using OpenCvSharp;
 
 namespace AgentKitLib.OcrEnhance.Imaging.OpenCv;
 
+/// <summary>
+/// OpenCV-based implementation of <see cref="IImageProcessor"/> that applies an ordered set of
+/// preprocessing steps to an input image to improve downstream OCR quality.
+/// </summary>
+/// <remarks>
+/// <para>
+/// This processor is designed to execute the steps produced by the enhancement planning layer
+/// (<see cref="IPromptPlanner"/> → <see cref="EnhancementPlan"/>), applying each <see cref="PlanStep"/> in order.
+/// </para>
+/// <para>
+/// The output is encoded as PNG to preserve detail (lossless) and provide a stable format for OCR engines.
+/// </para>
+/// <para>
+/// The current implementation loads the entire image into memory for decoding. For very large images,
+/// consider implementing a temporary file strategy.
+/// </para>
+/// </remarks>
 public sealed class OpenCvImageProcessor : IImageProcessor
 {
+    /// <summary>
+    /// Applies all requested plan steps to the input image stream and returns a new image stream
+    /// containing the processed result.
+    /// </summary>
+    /// <param name="inputImage">
+    /// Source image stream. The caller owns the stream; this method will not dispose it.
+    /// The stream may be non-seekable.
+    /// </param>
+    /// <param name="steps">
+    /// Ordered preprocessing steps to apply. Unknown operations fail fast to avoid silent no-ops.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    /// A <see cref="Stream"/> positioned at the beginning containing the processed image encoded as PNG.
+    /// </returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the input image cannot be decoded by OpenCV.
+    /// </exception>
+    /// <exception cref="NotSupportedException">
+    /// Thrown when the plan contains an unsupported operation.
+    /// </exception>
     public Task<Stream> ApplyAsync(Stream inputImage, IReadOnlyList<PlanStep> steps, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
 
+        // Read the entire input stream into memory to support reliable OpenCV decoding.
         using var inputMs = new MemoryStream();
         inputImage.CopyTo(inputMs);
         var inputBytes = inputMs.ToArray();
@@ -22,26 +61,31 @@ public sealed class OpenCvImageProcessor : IImageProcessor
         if (inputBytes.Length == 0)
             throw new InvalidOperationException("OpenCV could not decode the input image because the input stream was empty.");
 
+        // Decode image bytes into an OpenCV Mat (BGR color).
         using var src = Cv2.ImDecode(inputBytes, ImreadModes.Color);
         if (src.Empty())
         {
+            // Log a small header sample to aid diagnosis (wrong file, empty/corrupt bytes, unsupported format, etc.)
             var header = BitConverter.ToString(inputBytes.Take(Math.Min(16, inputBytes.Length)).ToArray());
             throw new InvalidOperationException(
                 $"OpenCV could not decode the input image (empty Mat). Bytes={inputBytes.Length}, Header[0..15]={header}");
         }
 
+        // Clone into a mutable Mat that is transformed in-place.
         using var current = src.Clone();
 
         foreach (var step in steps ?? Array.Empty<PlanStep>())
         {
             ct.ThrowIfCancellationRequested();
 
+            // Normalize op name and pull optional parameter bag (case-insensitive).
             var op = (step.Op ?? string.Empty).Trim().ToLowerInvariant();
             var p = step.Params ?? new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
 
             switch (op)
             {
                 case "":
+                    // Empty operation => no-op.
                     break;
 
                 case "rotate":
@@ -87,8 +131,7 @@ public sealed class OpenCvImageProcessor : IImageProcessor
                     break;
 
                 case "deskew":
-                    // TODO: implement proper skew angle estimation + rotation.
-                    // For now: no-op to avoid breaking pipelines.
+                    // TODO: implement skew estimation + rotation (currently a safe no-op).
                     break;
 
                 default:
@@ -97,7 +140,7 @@ public sealed class OpenCvImageProcessor : IImageProcessor
             }
         }
 
-        // Encode as PNG (lossless; good defaults for OCR preprocessing).
+        // Encode as PNG (lossless; typically good defaults for OCR preprocessing).
         var pngBytes = current.ImEncode(".png");
 
         Stream output = new MemoryStream(pngBytes);
@@ -105,6 +148,9 @@ public sealed class OpenCvImageProcessor : IImageProcessor
         return Task.FromResult(output);
     }
 
+    /// <summary>
+    /// Rotates the image around its center by the specified angle, expanding the canvas to avoid cropping.
+    /// </summary>
     private static void ApplyRotateInPlace(Mat imgBgr, double angleDegrees)
     {
         if (Math.Abs(angleDegrees) < 0.0001)
@@ -113,12 +159,13 @@ public sealed class OpenCvImageProcessor : IImageProcessor
         var center = new Point2f(imgBgr.Width / 2f, imgBgr.Height / 2f);
         using var rot = Cv2.GetRotationMatrix2D(center, angleDegrees, 1.0);
 
-        // Compute new bounding box to avoid cropping after rotation.
+        // Compute a new bounding box to avoid cropping after rotation.
         var cos = Math.Abs(rot.Get<double>(0, 0));
         var sin = Math.Abs(rot.Get<double>(0, 1));
         var newW = (int)Math.Round(imgBgr.Height * sin + imgBgr.Width * cos);
         var newH = (int)Math.Round(imgBgr.Height * cos + imgBgr.Width * sin);
 
+        // Translate to keep rotated image centered in the expanded canvas.
         rot.Set(0, 2, rot.Get<double>(0, 2) + (newW / 2.0) - center.X);
         rot.Set(1, 2, rot.Get<double>(1, 2) + (newH / 2.0) - center.Y);
 
@@ -127,6 +174,9 @@ public sealed class OpenCvImageProcessor : IImageProcessor
         dst.CopyTo(imgBgr);
     }
 
+    /// <summary>
+    /// Resizes the image based on either a scale factor or explicit width/height.
+    /// </summary>
     private static void ApplyZoomInPlace(Mat imgBgr, Dictionary<string, object> p)
     {
         // Support either scale OR (width/height).
@@ -154,6 +204,9 @@ public sealed class OpenCvImageProcessor : IImageProcessor
         dst.CopyTo(imgBgr);
     }
 
+    /// <summary>
+    /// Performs a basic auto-contrast stretch on the LAB luminance channel using the given cutoff percentage.
+    /// </summary>
     private static void ApplyAutoContrastInPlace(Mat imgBgr, double cutoff)
     {
         // cutoff = percentage (0..1) of pixels to clip at low/high ends
@@ -168,7 +221,7 @@ public sealed class OpenCvImageProcessor : IImageProcessor
         using var a = channels[1];
         using var b = channels[2];
 
-        // Compute histogram on L
+        // Compute histogram on L.
         int histSize = 256;
         Rangef histRange = new Rangef(0, 256);
         using var hist = new Mat();
@@ -202,7 +255,7 @@ public sealed class OpenCvImageProcessor : IImageProcessor
         if (high <= low)
             return;
 
-        // Stretch L to [0,255] using OpenCV ops (no C# operator overload assignment on using vars)
+        // Stretch L to [0,255] using OpenCV ops.
         using var lFloat = new Mat();
         l.ConvertTo(lFloat, MatType.CV_32F);
 
@@ -219,6 +272,9 @@ public sealed class OpenCvImageProcessor : IImageProcessor
         Cv2.CvtColor(merged, imgBgr, ColorConversionCodes.Lab2BGR);
     }
 
+    /// <summary>
+    /// Applies Contrast Limited Adaptive Histogram Equalization (CLAHE) to the LAB luminance channel.
+    /// </summary>
     private static void ApplyClaheInPlace(Mat imgBgr, double clipLimit, int tileGridSize)
     {
         clipLimit = Math.Max(0.1, clipLimit);
@@ -241,17 +297,20 @@ public sealed class OpenCvImageProcessor : IImageProcessor
         Cv2.CvtColor(merged, imgBgr, ColorConversionCodes.Lab2BGR);
     }
 
+    /// <summary>
+    /// Applies a simple denoise filter with coarse strength presets.
+    /// </summary>
     private static void ApplyDenoiseInPlace(Mat imgBgr, string strength)
     {
         strength = (strength ?? "light").Trim().ToLowerInvariant();
 
         using var dst = new Mat();
 
-        // V1: simple, fast filters
+        // V1: simple, fast filters.
         switch (strength)
         {
             case "strong":
-                // bilateral keeps edges reasonably well, but is slower
+                // Bilateral filter preserves edges reasonably well, but is slower.
                 Cv2.BilateralFilter(imgBgr, dst, d: 9, sigmaColor: 75, sigmaSpace: 75);
                 break;
 
@@ -267,6 +326,10 @@ public sealed class OpenCvImageProcessor : IImageProcessor
         dst.CopyTo(imgBgr);
     }
 
+    /// <summary>
+    /// Converts the image to a binary (black/white) representation.
+    /// Supports <c>method=otsu</c> (default), <c>method=adaptive</c>, or a fixed threshold.
+    /// </summary>
     private static void ApplyBinarizeInPlace(Mat imgBgr, Dictionary<string, object> p)
     {
         var method = GetString(p, "method", fallback: "otsu").Trim().ToLowerInvariant();
@@ -284,7 +347,6 @@ public sealed class OpenCvImageProcessor : IImageProcessor
 
             var c = GetDouble(p, "c", fallback: 5);
 
-            // OpenCvSharp's AdaptiveThreshold expects 'c' as the last parameter, not 'param1'.
             Cv2.AdaptiveThreshold(
                 gray, bin,
                 maxValue: 255,
@@ -295,7 +357,7 @@ public sealed class OpenCvImageProcessor : IImageProcessor
         }
         else
         {
-            // otsu (default) or fixed threshold
+            // Otsu (default) or fixed threshold.
             if (p.TryGetValue("threshold", out _))
             {
                 var t = GetDouble(p, "threshold", fallback: 128);
@@ -311,6 +373,9 @@ public sealed class OpenCvImageProcessor : IImageProcessor
         Cv2.CvtColor(bin, imgBgr, ColorConversionCodes.GRAY2BGR);
     }
 
+    /// <summary>
+    /// Applies a simple brightness shift by adding <paramref name="delta"/> to all pixels.
+    /// </summary>
     private static void ApplyBrightnessInPlace(Mat imgBgr, double delta)
     {
         if (Math.Abs(delta) < 0.0001)
@@ -321,14 +386,18 @@ public sealed class OpenCvImageProcessor : IImageProcessor
         dst.CopyTo(imgBgr);
     }
 
+    /// <summary>
+    /// Applies gamma correction using a precomputed lookup table (LUT) for efficiency.
+    /// </summary>
     private static void ApplyGammaInPlace(Mat imgBgr, double gamma)
     {
         gamma = Math.Clamp(gamma, 0.1, 10.0);
         if (Math.Abs(gamma - 1.0) < 0.0001)
             return;
 
-        // LUT for speed
         var inv = 1.0 / gamma;
+
+        // LUT for speed.
         using var lut = new Mat(1, 256, MatType.CV_8U);
         for (int i = 0; i < 256; i++)
         {
@@ -341,6 +410,9 @@ public sealed class OpenCvImageProcessor : IImageProcessor
         dst.CopyTo(imgBgr);
     }
 
+    /// <summary>
+    /// Sharpens the image via an unsharp mask (Gaussian blur + weighted subtraction).
+    /// </summary>
     private static void ApplySharpenInPlace(Mat imgBgr, double amount, double sigma)
     {
         amount = Math.Clamp(amount, 0.0, 5.0);
@@ -352,12 +424,15 @@ public sealed class OpenCvImageProcessor : IImageProcessor
         using var blurred = new Mat();
         Cv2.GaussianBlur(imgBgr, blurred, new Size(0, 0), sigma);
 
-        // unsharp mask: dst = img*(1+amount) + blurred*(-amount)
+        // Unsharp mask: dst = img*(1+amount) + blurred*(-amount)
         using var dst = new Mat();
         Cv2.AddWeighted(imgBgr, 1.0 + amount, blurred, -amount, 0, dst);
         dst.CopyTo(imgBgr);
     }
 
+    /// <summary>
+    /// Reads a string parameter from a generic plan parameter bag.
+    /// </summary>
     private static string GetString(Dictionary<string, object> p, string key, string fallback)
     {
         if (p.TryGetValue(key, out var v) && v is not null)
@@ -365,6 +440,9 @@ public sealed class OpenCvImageProcessor : IImageProcessor
         return fallback;
     }
 
+    /// <summary>
+    /// Reads an integer parameter from a generic plan parameter bag supporting common numeric representations.
+    /// </summary>
     private static int GetInt(Dictionary<string, object> p, string key, int fallback)
     {
         if (!p.TryGetValue(key, out var v) || v is null)
@@ -380,6 +458,9 @@ public sealed class OpenCvImageProcessor : IImageProcessor
         return fallback;
     }
 
+    /// <summary>
+    /// Reads a double parameter from a generic plan parameter bag supporting common numeric representations.
+    /// </summary>
     private static double GetDouble(Dictionary<string, object> p, string key, double fallback)
     {
         if (!p.TryGetValue(key, out var v) || v is null)
